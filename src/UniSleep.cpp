@@ -1,8 +1,17 @@
 
 #include "UniSleep.h"
 
+
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+volatile bool uniSleepIntFlag[UNI_SLEEP_INTERRUPT_NUM];
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+
 UniSleep::UniSleep(void) {
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+  _sleep_mode=RF_DEFAULT;
+#else /* CPU_ARCH==XTENSA_LX106_ARCH */
   _sleep_mode=_UNSUPPORTED_MODE_;
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
 #if CPU_ARCH!=AVR_ARCH /* AVR */
   _sleepDuration=0;
 #endif /* CPU_ARCH!=AVR_ARCH */
@@ -13,12 +22,22 @@ UniSleep::UniSleep(void) {
   gpio_wakeup=false;
   wifi_wakeup=false;
 #endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  for (int i=0; i < UNI_SLEEP_INTERRUPT_NUM ; i++) {
+    uniSleepIntFlag[i]=false;
+    this->intPinNum[i]=-1;
+  }
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
 }
 
 
-#if CPU_ARCH!=XTENSA_LX106_ARCH /* ESP8266以外 */
-int UniSleep::SetSleepMode(int mode) {
-  if (mode == _UNSUPPORTED_MODE_) return _UNSUPPORTED_MODE_;
+#if (CPU_ARCH==SAMD_ARCH) || (CPU_ARCH==XTENSA_LX6_ARCH) /* MKR, Zero  or ESP32 */
+int UniSleep::SetSleepMode(int mode, uint64_t time) {
+#if CPU_ARCH==SAMD_ARCH
+  if (time>0xFFFFFFFF) return UNI_SLEEP_UNSUPPORTED_DURATION;
+#endif /* CPU_ARCH==SAMD_ARCH */
+  uint32_t duration=(uint32_t) time;
+  if (mode == _UNSUPPORTED_MODE_) return UNI_SLEEP_UNSUPPORTED_MODE;
   switch(mode) {
 #if MODE_IDLE     != _UNSUPPORTED_MODE_
     case MODE_IDLE:
@@ -38,19 +57,111 @@ int UniSleep::SetSleepMode(int mode) {
       _sleep_mode=mode;
       break;
     default:
-      return _UNSUPPORTED_MODE_;
+      return UNI_SLEEP_UNSUPPORTED_MODE;
+  }
+  _sleepDuration=duration;
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==SAMD_ARCH || CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==AVR_ARCH
+int UniSleep::SetSleepMode(int mode, uint64_t duration) {
+  if (0!=duration) return UNI_SLEEP_UNSUPPORTED_DURATION;
+  if (mode == _UNSUPPORTED_MODE_) return UNI_SLEEP_UNSUPPORTED_MODE;
+  switch(mode) {
+#if MODE_IDLE     != _UNSUPPORTED_MODE_
+    case MODE_IDLE:
+#endif
+#if MODE_ADC      != _UNSUPPORTED_MODE_
+    case MODE_ADC:
+#endif
+#if MODE_PWR_SAVE != _UNSUPPORTED_MODE_
+    case MODE_PWR_SAVE:
+#endif
+#if MODE_STANDBY  != _UNSUPPORTED_MODE_
+    case MODE_STANDBY:
+#endif
+#if MODE_PWR_DOWN != _UNSUPPORTED_MODE_
+    case MODE_PWR_DOWN:
+#endif
+      _sleep_mode=mode;
+      break;
+    default:
+      return UNI_SLEEP_UNSUPPORTED_MODE;
+  }
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==AVR_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetSleepMode(int mode, uint64_t duration){
+  switch(mode){
+    case WAKE_RF_DEFAULT:
+    case WAKE_RFCAL:
+    case WAKE_NO_RFCAL:
+    case WAKE_RF_DISABLED:
+      break;
+    default: return UNI_SLEEP_UNSUPPORTED_MODE;
+  }
+  _sleepDuration=duration;
+  _sleep_mode=mode;
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH!=XTENSA_LX106_ARCH /* ESP8266以外 */
+int UniSleep::SetSleepMode(int mode) {
+  if (mode == UNI_SLEEP_UNSUPPORTED_MODE) return UNI_SLEEP_UNSUPPORTED_MODE;
+  switch(mode) {
+#if MODE_IDLE     != _UNSUPPORTED_MODE_
+    case MODE_IDLE:
+#endif
+#if MODE_ADC      != _UNSUPPORTED_MODE_
+    case MODE_ADC:
+#endif
+#if MODE_PWR_SAVE != _UNSUPPORTED_MODE_
+    case MODE_PWR_SAVE:
+#endif
+#if MODE_STANDBY  != _UNSUPPORTED_MODE_
+    case MODE_STANDBY:
+#endif
+#if MODE_PWR_DOWN != _UNSUPPORTED_MODE_
+    case MODE_PWR_DOWN:
+#endif
+      _sleep_mode=mode;
+      break;
+    default:
+      return UNI_SLEEP_UNSUPPORTED_MODE;
   }
 #if (CPU_ARCH==SAMD_ARCH) || (CPU_ARCH==XTENSA_LX6_ARCH) /* MKR, Zero  or ESP32 */
   _sleepDuration=0;
 #endif /* CPU_ARCH==SAMD_ARCH || CPU_ARCH==XTENSA_LX6_ARCH */
-  return 0;
+  return UNI_SLEEP_SUCCESS;
 }
 #endif /* CPU_ARCH!=XTENSA_LX106_ARCH */
 
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266以外 */
+int UniSleep::SetSleepMode(int mode) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH!=XTENSA_LX106_ARCH /* ESP8266以外 */
+int UniSleep::SetSleepMode(uint64_t duration){
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH!=XTENSA_LX106_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetSleepMode(uint64_t duration){
+  _sleepDuration=duration;
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
 
 #if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
-int UniSleep::SetSleepMode(int mode, uint32_t duration, int num, bool ulp, bool pad, bool gpio, bool wifi) {
-  if (mode == _UNSUPPORTED_MODE_) return _UNSUPPORTED_MODE_;
+int UniSleep::SetSleepMode(int mode, uint64_t duration, int num, bool ulp, bool pad, bool gpio, bool wifi) {
+  if (mode == _UNSUPPORTED_MODE_) return UNI_SLEEP_UNSUPPORTED_MODE;
   switch(mode) {
 #if MODE_IDLE     != _UNSUPPORTED_MODE_
     case MODE_IDLE:
@@ -70,19 +181,19 @@ int UniSleep::SetSleepMode(int mode, uint32_t duration, int num, bool ulp, bool 
       _sleep_mode=mode;
       break;
     default:
-      return _UNSUPPORTED_MODE_;
+      return UNI_SLEEP_UNSUPPORTED_MODE;
   }
   if ((_sleep_mode!=MODE_PWR_DOWN) && (gpio)) {
     _sleep_mode=_UNSUPPORTED_MODE_;
-    return _UNSUPPORTED_MODE_;
+    return UNI_SLEEP_UNSUPPORTED_MODE;
   }
   if ((_sleep_mode!=MODE_PWR_DOWN) && (num>=0)) {
     _sleep_mode=_UNSUPPORTED_MODE_;
-    return _UNSUPPORTED_MODE_;
+    return UNI_SLEEP_UNSUPPORTED_MODE;
   }
   if ((_sleep_mode!=MODE_PWR_DOWN) && (wifi)) {
     _sleep_mode=_UNSUPPORTED_MODE_;
-    return _UNSUPPORTED_MODE_;
+    return UNI_SLEEP_UNSUPPORTED_MODE;
   }
   uart_num=num;
   ulp_wakeup=ulp;
@@ -90,59 +201,15 @@ int UniSleep::SetSleepMode(int mode, uint32_t duration, int num, bool ulp, bool 
   gpio_wakeup=gpio;
   wifi_wakeup=wifi;
   _sleepDuration=duration;
-  return 0;
+  return UNI_SLEEP_SUCCESS;
 }
 #endif /* CPU_ARCH==XTENSA_LX6_ARCH */
 
-#if (CPU_ARCH==SAMD_ARCH) || (CPU_ARCH==XTENSA_LX6_ARCH) /* MKR, Zero  or ESP32 */
-int UniSleep::SetSleepMode(int mode, uint32_t duration) {
-  if (mode == _UNSUPPORTED_MODE_) return _UNSUPPORTED_MODE_;
-  switch(mode) {
-#if MODE_IDLE     != _UNSUPPORTED_MODE_
-    case MODE_IDLE:
-#endif
-#if MODE_ADC      != _UNSUPPORTED_MODE_
-    case MODE_ADC:
-#endif
-#if MODE_PWR_SAVE != _UNSUPPORTED_MODE_
-    case MODE_PWR_SAVE:
-#endif
-#if MODE_STANDBY  != _UNSUPPORTED_MODE_
-    case MODE_STANDBY:
-#endif
-#if MODE_PWR_DOWN != _UNSUPPORTED_MODE_
-    case MODE_PWR_DOWN:
-#endif
-      _sleep_mode=mode;
-      break;
-    default:
-      return _UNSUPPORTED_MODE_;
-  }
-  _sleepDuration=duration;
-  return 0;
+#if CPU_ARCH!=XTENSA_LX6_ARCH /* ESP32以外 */
+int UniSleep::SetSleepMode(int mode, uint64_t duration, int num, bool ulp, bool pad, bool gpio, bool wifi) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
 }
-#endif /* CPU_ARCH==SAMD_ARCH || CPU_ARCH==XTENSA_LX6_ARCH */
-
-#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
-int UniSleep::SetSleepMode(uint64_t duration){
-  _sleepDuration=duration;
-  return 0;
-}
-int UniSleep::SetSleepMode(uint8_t mode, uint64_t duration){
-  switch(mode){
-    case WAKE_RF_DEFAULT:
-    case WAKE_RFCAL:
-    case WAKE_NO_RFCAL:
-    case WAKE_RF_DISABLED:
-      break;
-    default: return _UNSUPPORTED_MODE_;
-  }
-  _sleepDuration=duration;
-  _sleep_mode=mode;
-  return 0;
-}
-#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
-
+#endif /* CPU_ARCH!=XTENSA_LX6_ARCH */
 
 bool UniSleep::Sleep(void) {
 #if CPU_ARCH==AVR_ARCH
@@ -168,14 +235,11 @@ bool UniSleep::Sleep(void) {
 #if CPU_ARCH==SAMD_ARCH /* MKR, Zero */
   switch(_sleep_mode) {
     case MODE_IDLE:
-      Serial.print("_sleepDuration=");Serial.println(_sleepDuration);
       if (_sleepDuration==0) {
         LowPower.idle();
       } else {
-        Serial.println("go to sleep");
         LowPower.idle(_sleepDuration);
       }
-      Serial.println("wake up");
       break;
 #ifdef BOARD_HAS_COMPANION_CHIP
     case MODE_PWR_SAVE:
@@ -239,6 +303,7 @@ bool UniSleep::Sleep(void) {
         esp_sleep_enable_timer_wakeup(_sleepDuration);
         esp_deep_sleep_start();
       }
+    default: return false;
   }
   return true;
 #endif /* CPU_ARCH==XTENSA_LX6_ARCH */
@@ -248,77 +313,332 @@ bool UniSleep::Sleep(void) {
   } else {
     ESP.deepSleep(_sleepDuration,(RFMode) _sleep_mode);
   }
+  return true;
 #endif /* CPU_ARCH==XTENSA_LX106_ARCH */
 }
 
 #if CPU_ARCH==AVR_ARCH
-bool UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void), uint32_t mode) {
-  if ((LOW!=mode) && (CHANGE!=mode) && (RISING!=mode) && (FALLING!=mode)) return false;
-  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return false;
+int UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void), uint32_t mode) {
+  if (userFunc==NULL) return UNI_SLEEP_NULL_CALLBACK;
+  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  if ((LOW!=mode) && (CHANGE!=mode) && (RISING!=mode) && (FALLING!=mode)) return UNI_SLEEP_UNSUPPORTED_MODE;
   attachInterrupt(digitalPinToInterrupt(pin), userFunc, mode);
-  return true;
+  return UNI_SLEEP_SUCCESS;
 }
 #endif /* CPU_ARCH==AVR_ARCH */
 
 #if CPU_ARCH==SAMD_ARCH
-bool UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void), irq_mode mode) {
-  if ((LOW!=mode) && (CHANGE!=mode) && (RISING!=mode) && (FALLING!=mode) && (HIGH!=mode)) return false;
+int UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void), irq_mode mode) {
+  if (userFunc==NULL) return UNI_SLEEP_NULL_CALLBACK;
+  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  if ((LOW!=mode) && (CHANGE!=mode) && (RISING!=mode) && (FALLING!=mode) && (HIGH!=mode)) return UNI_SLEEP_UNSUPPORTED_MODE;
   LowPower.attachInterruptWakeup(pin,  userFunc, mode);
-  return true;
-}
-#endif /* CPU_ARCH==SAMD_ARCH */
-
-#if CPU_ARCH==SAMD_ARCH
-bool UniSleep::SetInterrupt(uint32_t pin, voidFuncPtr callback, adc_interrupt mode, uint16_t lo, uint16_t hi) {
-  LowPower.attachAdcInterrupt( pin,  callback,  mode,  lo,  hi);
-  return true;
+  return UNI_SLEEP_SUCCESS;
 }
 #endif /* CPU_ARCH==SAMD_ARCH */
 
 #if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
-bool UniSleep::SetInterrupt(gpio_num_t pin, int level) {
-  if ((level!=HIGH) && (level!=LOW)) return false;
-  //if (checkPinNumber(pin)) {
-  if (esp_sleep_is_valid_wakeup_gpio(pin)) {
-    if (ESP_OK == esp_sleep_enable_ext0_wakeup(pin, level)) return true;
-  };
-  return false;
-}
-
-bool UniSleep::SetInterrupt(uint64_t mask, esp_sleep_ext1_wakeup_mode_t level) {
-  if ((level!=ESP_EXT1_WAKEUP_ALL_LOW) && (level!=ESP_EXT1_WAKEUP_ANY_HIGH)) return false;
-  if (ESP_OK == esp_sleep_enable_ext1_wakeup(mask, level)) return true;
-  return false;
+int UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void), uint32_t mode) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
 }
 #endif /* CPU_ARCH==XTENSA_LX6_ARCH */
 
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void), uint32_t mode) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
 
 #if CPU_ARCH==AVR_ARCH
-bool UniSleep::UnSetInterrupt(uint32_t pin){
-  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return false;
-  detachInterrupt(digitalPinToInterrupt(pin));
-  return true;
+int UniSleep::SetInterrupt(uint32_t pin, uint8_t num, uint32_t mode) {
+  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  if (num >= UNI_SLEEP_INTERRUPT_NUM ) return UNI_SLEEP_ILLEGAL_CALLBACK_NUMBER;
+  if (this->intPinNum[num]!=-1) return UNI_SLEEP_CALLBACK_ALREADY_IN_USE;
+  if ((LOW!=mode) && (CHANGE!=mode) && (RISING!=mode) && (FALLING!=mode)) return UNI_SLEEP_UNSUPPORTED_MODE;
+  this->intPinNum[num]=pin;
+  switch(num){
+    case 0: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack0, mode);break;
+    case 1: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack1, mode);break;
+    case 2: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack2, mode);break;
+    case 3: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack3, mode);break;
+    case 4: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack4, mode);break;
+    case 5: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack5, mode);break;
+    case 6: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack6, mode);break;
+    case 7: attachInterrupt(digitalPinToInterrupt(pin), ExIntCallBack7, mode);break;
+  }
+  return UNI_SLEEP_SUCCESS;
 }
 #endif /* CPU_ARCH==AVR_ARCH */
 
 #if CPU_ARCH==SAMD_ARCH
-bool UniSleep::UnSetInterrupt(void) {
-  LowPower.detachAdcInterrupt();
-  return true;
-}
-bool UniSleep::UnSetInterrupt(uint32_t pin){
-  detachInterrupt(digitalPinToInterrupt(pin));
-  return false;
+int UniSleep::SetInterrupt(uint32_t pin, uint8_t num, irq_mode mode) {
+  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  if (num >= UNI_SLEEP_INTERRUPT_NUM ) return UNI_SLEEP_ILLEGAL_CALLBACK_NUMBER;
+  if (this->intPinNum[num]!=-1) return UNI_SLEEP_CALLBACK_ALREADY_IN_USE;
+  if ((LOW!=mode) && (CHANGE!=mode) && (RISING!=mode) && (FALLING!=mode) && (HIGH!=mode)) return UNI_SLEEP_UNSUPPORTED_MODE;
+  this->intPinNum[num]=pin;
+  switch(num){
+    case 0:LowPower.attachInterruptWakeup(pin,  ExIntCallBack0, mode);break;
+    case 1:LowPower.attachInterruptWakeup(pin,  ExIntCallBack1, mode);break;
+    case 2:LowPower.attachInterruptWakeup(pin,  ExIntCallBack2, mode);break;
+    case 3:LowPower.attachInterruptWakeup(pin,  ExIntCallBack3, mode);break;
+    case 4:LowPower.attachInterruptWakeup(pin,  ExIntCallBack4, mode);break;
+    case 5:LowPower.attachInterruptWakeup(pin,  ExIntCallBack5, mode);break;
+    case 6:LowPower.attachInterruptWakeup(pin,  ExIntCallBack6, mode);break;
+    case 7:LowPower.attachInterruptWakeup(pin,  ExIntCallBack7, mode);break;
+  }
+  return UNI_SLEEP_SUCCESS;
 }
 #endif /* CPU_ARCH==SAMD_ARCH */
 
 #if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
-bool UniSleep::UnSetInterrupt(esp_sleep_source_t source) {
-  if (ESP_OK==esp_sleep_disable_wakeup_source(source)) return true;
-  return false;
-}
-
-esp_sleep_wakeup_cause_t UniSleep::WakeupReason(void){
-  return esp_sleep_get_wakeup_cause();
+int UniSleep::SetInterrupt(gpio_num_t pin, int num, int level) {
+  return SetInterrupt(pin, level);
 }
 #endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetInterrupt(uint32_t pin, uint8_t num, uint32_t mode) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH==AVR_ARCH
+int UniSleep::SetInterrupt(uint64_t mask, esp_sleep_ext1_wakeup_mode_t level) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==AVR_ARCH */
+
+#if CPU_ARCH==SAMD_ARCH
+int UniSleep::SetInterrupt(uint64_t mask, esp_sleep_ext1_wakeup_mode_t level) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==SAMD_ARCH */
+
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+int UniSleep::SetInterrupt(uint64_t mask, esp_sleep_ext1_wakeup_mode_t level) {
+  if ((level!=ESP_EXT1_WAKEUP_ALL_LOW) && (level!=ESP_EXT1_WAKEUP_ANY_HIGH)) return UNI_SLEEP_UNSUPPORTED_MODE;
+  if (ESP_OK == esp_sleep_enable_ext1_wakeup(mask, level)) return UNI_SLEEP_SUCCESS;
+  return UNI_SLEEP_FAILURE;
+}
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetInterrupt(uint64_t mask, esp_sleep_ext1_wakeup_mode_t level) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH==AVR_ARCH
+int UniSleep::SetInterrupt(uint32_t pin,  void (*userFunc)(void), adc_interrupt mode, uint16_t lo, uint16_t hi) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==AVR_ARCH */
+
+#if CPU_ARCH==SAMD_ARCH
+int UniSleep::SetInterrupt(uint32_t pin, voidFuncPtr callback, adc_interrupt mode, uint16_t lo, uint16_t hi) {
+  //if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  LowPower.attachAdcInterrupt( pin,  callback,  mode,  lo,  hi);
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==SAMD_ARCH */
+
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+int UniSleep::SetInterrupt(uint32_t pin, void (*userFunc)(void) , adc_interrupt mode, uint16_t lo, uint16_t hi) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetInterrupt(uint32_t pin,  void (*userFunc)(void), adc_interrupt mode, uint16_t lo, uint16_t hi) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH==AVR_ARCH
+int UniSleep::SetInterrupt(gpio_num_t pin, int level) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==AVR_ARCH */
+
+#if CPU_ARCH==SAMD_ARCH
+int UniSleep::SetInterrupt(gpio_num_t pin, int level) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==SAMD_ARCH */
+
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+int UniSleep::SetInterrupt(gpio_num_t pin, int level) {
+  if ((level!=HIGH) && (level!=LOW)) return UNI_SLEEP_UNSUPPORTED_MODE;
+  if (esp_sleep_is_valid_wakeup_gpio(pin)) {
+    if (ESP_OK == esp_sleep_enable_ext0_wakeup(pin, level)) return UNI_SLEEP_SUCCESS;
+  };
+  return UNI_SLEEP_FAILURE;
+}
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::SetInterrupt(gpio_num_t pin, int level) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH==AVR_ARCH
+int UniSleep::UnSetInterrupt(void) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==AVR_ARCH */
+
+#if CPU_ARCH==SAMD_ARCH
+int UniSleep::UnSetInterrupt(void) {
+  LowPower.detachAdcInterrupt();
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==SAMD_ARCH */
+
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+int UniSleep::UnSetInterrupt(void) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::UnSetInterrupt(void) {
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+#if CPU_ARCH==AVR_ARCH
+int UniSleep::UnSetInterrupt(uint32_t pin){
+  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  detachInterrupt(digitalPinToInterrupt(pin));
+  for (int i=0; i< UNI_SLEEP_INTERRUPT_NUM;i++) {
+    if (this->intPinNum[i]==pin) {
+      this->intPinNum[i]=-1;
+      uniSleepIntFlag[i]=false;
+      break;
+    }
+  }
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==AVR_ARCH */
+
+#if CPU_ARCH==SAMD_ARCH
+int UniSleep::UnSetInterrupt(uint32_t pin){
+  if (NOT_AN_INTERRUPT==digitalPinToInterrupt(pin)) return UNI_SLEEP_ILLEGAL_PIN_NUMBER;
+  detachInterrupt(digitalPinToInterrupt(pin));
+  for (int i=0; i< UNI_SLEEP_INTERRUPT_NUM;i++) {
+    if (this->intPinNum[i]==pin) {
+      this->intPinNum[i]=-1;
+      uniSleepIntFlag[i]=false;
+      break;
+    }
+  }
+  return UNI_SLEEP_SUCCESS;
+}
+#endif /* CPU_ARCH==SAMD_ARCH */
+
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+int UniSleep::UnSetInterrupt(esp_sleep_source_t source) {
+  if (ESP_OK==esp_sleep_disable_wakeup_source(source)) return UNI_SLEEP_SUCCESS;
+  return UNI_SLEEP_FAILURE;
+}
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH */
+
+#if CPU_ARCH==XTENSA_LX106_ARCH /* ESP8266 */
+int UniSleep::UnSetInterrupt(uint32_t pin){
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+}
+#endif /* CPU_ARCH==XTENSA_LX106_ARCH */
+
+void UniSleep::ClearInterruptFlag(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  for (int i=0;i<UNI_SLEEP_INTERRUPT_NUM;i++){
+    uniSleepIntFlag[i]=false;
+  }
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+
+int32_t UniSleep::WakeUpReason(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uint8_t rst=0;
+  for (int i=0; i < UNI_SLEEP_INTERRUPT_NUM ; i++) {
+    uint8_t mask= 1;
+    if (i!=0) mask = mask << i;
+    if (uniSleepIntFlag[i]){
+      rst = rst | mask;
+      uniSleepIntFlag[i]=false;
+    }
+  }
+  int32_t retVal=256*rst;
+  return retVal;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+  return (uint32_t) esp_sleep_get_wakeup_cause();
+#else /* CPU_ARCH==XTENSA_LX6_ARCH (ESP32) */
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH (ESP32) */
+}
+
+uint64_t UniSleep::Ext1WakeupStatus(void) {
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+  return esp_sleep_get_ext1_wakeup_status();
+#else /* CPU_ARCH==XTENSA_LX6_ARCH ESP32 */
+  return 0;
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH ESP32 */
+}
+
+int UniSleep::TouchpadWakeupStatus(void) {
+#if CPU_ARCH==XTENSA_LX6_ARCH /* ESP32 */
+  return (int) esp_sleep_get_touchpad_wakeup_status();
+#else /* CPU_ARCH==XTENSA_LX6_ARCH ESP32 */
+  return UNI_SLEEP_UNSUPPORTED_FUNCTION;
+#endif /* CPU_ARCH==XTENSA_LX6_ARCH ESP32 */
+}
+
+bool UniSleep::checkSleepMode(uint64_t mode) {
+  if (mode==_UNSUPPORTED_MODE_) return false;
+  return true;
+}
+
+void ExIntCallBack0(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[0]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack1(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[1]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack2(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[2]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack3(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[3]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack4(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[4]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack5(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[5]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack6(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[6]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+void ExIntCallBack7(void){
+#if (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) /* esp8266とesp32のどちらでもない */
+  uniSleepIntFlag[7]=true;
+#endif /* (CPU_ARCH!=XTENSA_LX106_ARCH) && (CPU_ARCH!=XTENSA_LX6_ARCH) */
+}
+
